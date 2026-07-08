@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 node_modules/
 dist/
+electron-app/renderer/blockly/bundle.js
+electron-app/renderer/blockly/bundle.js.map
+electron-app/renderer/blockly/media/

@@ -6,7 +6,8 @@ window.CONTENT_KO = {
     unplugged: "언플러그드 코딩",
     plugged: "플러그드 코딩",
     specs: "로봇 사양",
-    control: "로봇 제어"
+    control: "로봇 제어",
+    blocks: "블록 코딩"
   },
   appTitle: "라쿤봇 사용 가이드",
   langLabel: "언어",
@@ -461,6 +462,33 @@ window.CONTENT_KO = {
           <span id="camera-status" class="status-badge status-idle">대기중</span>
         </div>
         <pre id="camera-log" class="log-box"></pre>
+      `
+    },
+    blocks: {
+      title: "블록 코딩",
+      html: `
+        <p>블록을 조립해서 라쿤봇 Python 프로그램을 만드는 편집기입니다.
+        왼쪽 카테고리에서 블록을 끌어다 놓으면 오른쪽에 Python 코드가 실시간으로 생성됩니다.</p>
+
+        <div class="blocks-page">
+          <div class="blocks-toolbar">
+            <button id="btn-blocks-new" class="btn btn-small">새 작업</button>
+            <button id="btn-blocks-save" class="btn btn-small">블록 저장</button>
+            <button id="btn-blocks-load" class="btn btn-small">블록 불러오기</button>
+            <input id="blocks-file-input" type="file" accept=".json" hidden>
+            <span class="blocks-toolbar-spacer"></span>
+            <span id="blocks-status" class="blocks-status"></span>
+            <button id="btn-code-copy" class="btn btn-small btn-primary">코드 복사</button>
+            <button id="btn-code-save" class="btn btn-small">.py로 저장</button>
+          </div>
+          <div class="blocks-main">
+            <div id="blockly-workspace"></div>
+            <div class="code-panel">
+              <div class="code-panel-title">생성된 Python 코드</div>
+              <pre id="python-code"></pre>
+            </div>
+          </div>
+        </div>
       `
     }
   }

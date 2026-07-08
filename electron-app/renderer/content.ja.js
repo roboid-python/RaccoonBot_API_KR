@@ -6,7 +6,8 @@ window.CONTENT_JA = {
     unplugged: "アンプラグドコーディング",
     plugged: "プラグドコーディング",
     specs: "ロボット仕様",
-    control: "ロボット制御"
+    control: "ロボット制御",
+    blocks: "ブロックコーディング"
   },
   appTitle: "ラクーンボット使用ガイド",
   langLabel: "言語",
@@ -461,6 +462,33 @@ window.CONTENT_JA = {
           <span id="camera-status" class="status-badge status-idle">待機中</span>
         </div>
         <pre id="camera-log" class="log-box"></pre>
+      `
+    },
+    blocks: {
+      title: "ブロックコーディング",
+      html: `
+        <p>ブロックを組み立ててラクーンボットのPythonプログラムを作るエディタです。
+        左のカテゴリからブロックをドラッグ&ドロップすると、右側にPythonコードがリアルタイムで生成されます。</p>
+
+        <div class="blocks-page">
+          <div class="blocks-toolbar">
+            <button id="btn-blocks-new" class="btn btn-small">新規作成</button>
+            <button id="btn-blocks-save" class="btn btn-small">ブロックを保存</button>
+            <button id="btn-blocks-load" class="btn btn-small">ブロックを読み込み</button>
+            <input id="blocks-file-input" type="file" accept=".json" hidden>
+            <span class="blocks-toolbar-spacer"></span>
+            <span id="blocks-status" class="blocks-status"></span>
+            <button id="btn-code-copy" class="btn btn-small btn-primary">コードをコピー</button>
+            <button id="btn-code-save" class="btn btn-small">.pyで保存</button>
+          </div>
+          <div class="blocks-main">
+            <div id="blockly-workspace"></div>
+            <div class="code-panel">
+              <div class="code-panel-title">生成されたPythonコード</div>
+              <pre id="python-code"></pre>
+            </div>
+          </div>
+        </div>
       `
     }
   }
