@@ -25,11 +25,11 @@
 """
 
 import cv2
-import mediapipe as mp
 import numpy as np
 import math
 import time
 import sys
+import threading
 
 # =============================================================================
 # 0. 기능 활성화 스위치
@@ -37,7 +37,11 @@ import sys
 # 손 동작(모션) 인식 기능을 영구적으로 끄려면 False로 둡니다.
 # False이면 Mediapipe Hands 모델을 초기화하지 않고, 카메라 프리뷰와
 # 마우스 HUD 버튼(속도/민감도/배경/카메라 전환/홈 복귀)만 동작합니다.
-ENABLE_HAND_TRACKING = False
+ENABLE_HAND_TRACKING = True
+
+# 손 추적이 꺼져 있으면 mediapipe가 설치되지 않은 PC에서도 실행 가능하도록 조건부 import
+if ENABLE_HAND_TRACKING:
+    import mediapipe as mp
 
 # 로보메이션 로봇 제어 라이브러리 가져오기
 try:
@@ -112,6 +116,19 @@ smooth_z = 12.0
 cap = None
 current_cam_idx = 0
 
+# Windows에서는 DirectShow 백엔드가 기본(MSMF)보다 장치 열기와 핫스왑이 빠르고 안정적임
+CAP_BACKEND = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+
+def open_capture(idx):
+    """지정 인덱스의 카메라를 열고 640x480으로 설정합니다. 실패 시 None을 반환합니다."""
+    temp_cap = cv2.VideoCapture(idx, CAP_BACKEND)
+    if temp_cap.isOpened():
+        temp_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        temp_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        return temp_cap
+    temp_cap.release()
+    return None
+
 def change_camera(idx):
     """
     실시간으로 비디오 스트림을 해제하고 지정된 인덱스의 카메라를 연결합니다.
@@ -119,32 +136,28 @@ def change_camera(idx):
     """
     global cap, current_cam_idx
     prev_idx = current_cam_idx
-    
+
     # 기존 카메라 연결 해제
     if cap is not None:
         cap.release()
-        
+
     print(f"[정보] {idx}번 카메라 장치 연결을 새로 시도합니다...")
-    temp_cap = cv2.VideoCapture(idx)
-    
-    if temp_cap.isOpened():
-        cap = temp_cap
-        # 해상도 재캘리브레이션
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    new_cap = open_capture(idx)
+
+    if new_cap is not None:
+        cap = new_cap
         current_cam_idx = idx
         print(f"[성공] {idx}번 카메라로 정상 전환되었습니다.")
         return True
-    else:
-        print(f"[오류] {idx}번 카메라 연결에 실패했습니다. 기존 {prev_idx}번 카메라로 안전 복구합니다.")
-        temp_cap.release()
-        
-        # Fallback: 이전 카메라 장치로 재연결
-        cap = cv2.VideoCapture(prev_idx)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        return False
+
+    print(f"[오류] {idx}번 카메라 연결에 실패했습니다. 기존 {prev_idx}번 카메라로 안전 복구합니다.")
+    # Fallback: 이전 카메라 장치로 재연결
+    cap = open_capture(prev_idx)
+    if cap is None:
+        # 복구조차 실패하면 루프가 종료되므로 원인을 명확히 알림
+        print(f"[치명적 오류] 기존 {prev_idx}번 카메라 복구에도 실패했습니다. 프로그램을 종료합니다.")
+        cap = cv2.VideoCapture()  # isOpened()가 False인 빈 객체로 루프 안전 종료 유도
+    return False
 
 # =============================================================================
 # 5. 마우스 클릭 이벤트 핸들러 (HUD 버튼 6개 클릭 감지)
@@ -189,14 +202,21 @@ def mouse_callback(event, x, y, flags, param):
                 
             # 5. CAM SELECT 조절 버튼 클릭 (x: 420 ~ 515)
             elif 420 <= x <= 515:
-                # 0, 1, 2 순환하며 카메라 전환 시도
-                next_cam_idx = (current_cam_idx + 1) % 3
                 clicked_button_idx = 4
                 click_feedback_time = time.time()
-                if change_camera(next_cam_idx):
-                    print(f"[HUD 버튼] 카메라 채널 핫스왑 완료 -> CAM {next_cam_idx}")
-                else:
-                    print(f"[HUD 버튼] 카메라 채널 핫스왑 실패 -> 기존 CAM {current_cam_idx} 유지")
+                # 0, 1, 2 순환하며 카메라 전환 시도. 바로 다음 채널이 없으면(예: 1번 미장착)
+                # 그 다음 채널(2번)까지 순차 시도하여 모든 카메라에 도달 가능하도록 함
+                switched = False
+                for step in (1, 2):
+                    next_cam_idx = (current_cam_idx + step) % 3
+                    if next_cam_idx == current_cam_idx:
+                        continue
+                    if change_camera(next_cam_idx):
+                        print(f"[HUD 버튼] 카메라 채널 핫스왑 완료 -> CAM {next_cam_idx}")
+                        switched = True
+                        break
+                if not switched:
+                    print(f"[HUD 버튼] 다른 카메라 채널을 찾지 못함 -> 기존 CAM {current_cam_idx} 유지")
                 
             # 6. RESET HOME 버튼 클릭 (x: 523 ~ 632)
             elif 523 <= x <= 632:
@@ -211,49 +231,61 @@ def mouse_callback(event, x, y, flags, param):
 raccoon = None
 is_robot_connected = False
 
+# 로봇(USB-BLE 동글) 미연결 시 wait_until_ready()가 무한 대기하여 카메라 화면조차
+# 뜨지 않는 문제 방지: 연결을 백그라운드 스레드에서 시도하고 제한 시간만 기다린다.
+ROBOT_CONNECT_TIMEOUT = 8.0  # 초
+
 if ROBOID_AVAILABLE:
-    try:
-        print("[정보] 라쿤봇 하드웨어 연결을 시도합니다...")
-        raccoon = Raccoon()
-        wait_until_ready()
-        
-        raccoon.lock_horz()   # 말단 장치 수평 잠금
-        raccoon.open_gripper() # 그리퍼 초기 열기
-        is_robot_connected = True
-        print("[성공] 라쿤봇이 정상 연결되었습니다.")
-    except Exception as e:
-        print(f"[오류] 라쿤봇 연결 실패: {e}")
-        print("[정보] 시뮬레이션 모드로 작동을 시작합니다.")
-        is_robot_connected = False
+    def _connect_robot():
+        global raccoon, is_robot_connected
+        try:
+            print("[정보] 라쿤봇 하드웨어 연결을 시도합니다...")
+            robot = Raccoon()
+            wait_until_ready()
+            robot.lock_horz()    # 말단 장치 수평 잠금
+            robot.open_gripper() # 그리퍼 초기 열기
+            raccoon = robot
+            is_robot_connected = True
+            print("[성공] 라쿤봇이 정상 연결되었습니다.")
+        except Exception as e:
+            print(f"[오류] 라쿤봇 연결 실패: {e}")
+            print("[정보] 시뮬레이션 모드로 작동을 시작합니다.")
+
+    _connect_thread = threading.Thread(target=_connect_robot, daemon=True)
+    _connect_thread.start()
+    _connect_thread.join(ROBOT_CONNECT_TIMEOUT)
+    if not is_robot_connected:
+        print(f"[정보] {ROBOT_CONNECT_TIMEOUT:.0f}초 내에 로봇을 찾지 못해 시뮬레이션 모드로 시작합니다."
+              " (이후 연결되면 자동으로 CONNECTED 상태로 전환됩니다.)")
 else:
     print("[정보] 시뮬레이션 모드로 작동을 시작합니다.")
 
 # =============================================================================
 # 7. Mediapipe 및 OpenCV 환경 구축 (다중 웹캠 자동 탐색 포함)
 # =============================================================================
-mp_hands = mp.solutions.hands
-mp_drawing = mp.solutions.drawing_utils
-
-hands = mp_hands.Hands(
-    max_num_hands=1,
-    min_detection_confidence=0.75,
-    min_tracking_confidence=0.7
-) if ENABLE_HAND_TRACKING else None
-
-if not ENABLE_HAND_TRACKING:
+if ENABLE_HAND_TRACKING:
+    mp_hands = mp.solutions.hands
+    mp_drawing = mp.solutions.drawing_utils
+    hands = mp_hands.Hands(
+        max_num_hands=1,
+        min_detection_confidence=0.75,
+        min_tracking_confidence=0.7
+    )
+else:
+    mp_hands = None
+    mp_drawing = None
+    hands = None
     print("[정보] 모션 인식(손 동작 인식) 기능이 비활성화되어 있습니다. 카메라 프리뷰와 HUD 버튼만 동작합니다.")
 
 # 다중 카메라 인덱스 자동 검색 시도 (0번 -> 1번 -> 2번)
 for cam_idx in range(3):
     print(f"[정보] {cam_idx}번 카메라 장치 연결을 시도합니다...")
-    temp_cap = cv2.VideoCapture(cam_idx)
-    if temp_cap.isOpened():
+    temp_cap = open_capture(cam_idx)
+    if temp_cap is not None:
         cap = temp_cap
         current_cam_idx = cam_idx
         print(f"[성공] {cam_idx}번 카메라 장치가 활성화되었습니다.")
         break
-    else:
-        temp_cap.release()
 
 if cap is None or not cap.isOpened():
     print("[치명적 오류] 사용 가능한 카메라 장치(0, 1, 2)를 찾을 수 없거나 활성화할 수 없습니다.")
@@ -267,9 +299,24 @@ window_name = "RaccoonBot HUD Interface"
 cv2.namedWindow(window_name)
 cv2.setMouseCallback(window_name, mouse_callback)
 
-# 640x480으로 창 해상도를 안전하게 고정합니다.
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+# 외부 런처(Electron)에서 stdin으로 "STOP"을 보내면 안전 종료 절차를 밟도록 감시 스레드 가동
+# (강제 kill 시 로봇 안전 정지 코드가 실행되지 못하는 문제 방지)
+stop_requested = False
+
+def _stdin_watcher():
+    global stop_requested
+    if sys.stdin is None:
+        return
+    try:
+        for line in sys.stdin:
+            if line.strip().upper() == "STOP":
+                break
+    except Exception:
+        pass
+    # STOP 수신 또는 stdin EOF(런처 프로세스 종료) 시 모두 안전 종료
+    stop_requested = True
+
+threading.Thread(target=_stdin_watcher, daemon=True).start()
 
 # 프레임 레이트(FPS) 계산용
 prev_frame_time = 0
@@ -435,23 +482,11 @@ while cap.isOpened():
         # F. 로봇 제어 신호 송출 제어 (이탈 시 정지 제약을 없애고 전송 주기 및 데드존만 충족하면 상시 전송)
         # ---------------------------------------------------------------------
         current_time = time.time()
-        
-        # 1. 홈 복귀 플래그 체크 시 즉각 홈 복귀 실행
-        if request_home_reset:
-            smooth_x, smooth_y, smooth_z = 15.0, 0.0, 12.0
-            if is_robot_connected and raccoon:
-                try:
-                    # wait=False: 로봇이 도착할 때까지 기다리지 않고 즉시 반환하여
-                    # 카메라 캡처/HUD 루프가 멈추지 않도록 함 (끊김의 실제 원인)
-                    raccoon.move_to(15.0, 0.0, 12.0, SPEED_PRESETS[current_speed_idx], wait=False)
-                except Exception as ex:
-                    print(f"[오류] 홈 리셋 명령 전송 실패: {ex}")
-            last_sent_x, last_sent_y, last_sent_z = 15.0, 0.0, 12.0
-            request_home_reset = False
-            print("[RESET] 홈 위치로 복귀 완료.")
-            
-        # 2. 송신 주기가 충족되었고 일시정지 상태가 아닐 때 (in_box 제약 제거하여 끊김 해결!)
-        elif not is_paused and (current_time - last_send_time >= SEND_INTERVAL):
+
+        # 송신 주기가 충족되었고 일시정지 상태가 아닐 때 좌표 전송
+        # (홈 복귀 요청은 손 감지 여부와 무관하게 루프 하단의 공통 블록에서 처리)
+        # (in_box 제약 제거하여 끊김 해결!)
+        if not is_paused and not request_home_reset and (current_time - last_send_time >= SEND_INTERVAL):
             target_x_rounded = round(smooth_x, 1)
             target_y_rounded = round(smooth_y, 1)
             target_z_rounded = round(smooth_z, 1)
@@ -673,11 +708,23 @@ while cap.isOpened():
         print("[정보] 사용자에 의해 제어 루프를 탈출합니다.")
         break
 
+    # 외부 런처의 안전 종료(STOP) 요청 감지
+    if stop_requested:
+        print("[정보] 런처의 종료 요청을 수신하여 안전 종료를 시작합니다.")
+        break
+
+    # 사용자가 창을 X 버튼으로 닫은 경우 감지 (미감지 시 창이 계속 되살아남)
+    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+        print("[정보] 화면 창이 닫혀 제어 루프를 종료합니다.")
+        break
+
 # =============================================================================
 # 9. 자원 해제 및 안전한 하드웨어 접속 종료
 # =============================================================================
 if cap is not None:
     cap.release()
+if hands is not None:
+    hands.close()
 cv2.destroyAllWindows()
 
 if is_robot_connected and raccoon:
