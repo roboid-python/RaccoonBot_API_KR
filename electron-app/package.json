@@ -1,0 +1,12 @@
+{
+  "name": "raccoonbot-guide",
+  "version": "1.0.0",
+  "description": "RaccoonBot usage guide & camera control launcher (KO/JA)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
