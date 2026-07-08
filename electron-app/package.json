@@ -22,6 +22,12 @@
       "preload.js",
       "renderer/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../camera_control.py",
+        "to": "camera_control.py"
+      }
+    ],
     "win": {
       "target": "nsis"
     },

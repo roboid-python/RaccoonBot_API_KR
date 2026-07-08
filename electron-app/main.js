@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
-const PROJECT_ROOT = path.join(__dirname, '..');
+// 개발 모드: 저장소 루트의 스크립트 사용 / 배포(설치) 모드: 설치 폴더의 resources에 동봉된 스크립트 사용
+const PROJECT_ROOT = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
 const CAMERA_SCRIPT = path.join(PROJECT_ROOT, 'camera_control.py');
 const VENV_PYTHON = 'C:\\Users\\Public\\raccoon_venv\\Scripts\\python.exe';
 
