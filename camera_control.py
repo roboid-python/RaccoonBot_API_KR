@@ -20,7 +20,11 @@
      - [BG MODE] HUD 버튼을 추가하여 SPOTLIGHT(배경 15%), BLACK(배경 0%), ORIGINAL(배경 100%) 실시간 토글
   7. 미세 진동 차단 및 스무딩:
      - EMA 필터와 3mm 데드존 필터 적용
-  8. 주먹 쥐기/펴기 제스처를 통한 그리퍼 실시간 제어
+  8. 두 손 손가락 제스처 기반 3D + 그리퍼 제어:
+     - 오른손: 엄지-검지 간격 = X축(앞/뒤), 중지 화면 높이 = Z축(위/아래)
+     - 왼손  : 엄지-검지 간격 = Y축(좌우),   중지 펴기/굽히기 = 그리퍼 열기/닫기
+     - 엄지-검지 간격은 손바닥 크기로 정규화하여 카메라와의 거리에 무관하게 동작
+     - 감지되지 않은 손이 담당하는 축은 직전 값을 유지(Hold)
   9. 6가지 그래픽 버튼 구성 (START/PAUSE, SPEED, SENS, BG MODE, CAM SELECT, RESET HOME)
 """
 
@@ -30,6 +34,7 @@ import math
 import time
 import sys
 import threading
+import ctypes
 
 # =============================================================================
 # 0. 기능 활성화 스위치
@@ -161,6 +166,36 @@ def change_camera(idx):
     return False
 
 # =============================================================================
+# 4.5 전체 화면 표시 설정 (레터박스 스케일링 + 마우스 좌표 역매핑)
+# =============================================================================
+is_fullscreen = True  # 시작 시 전체 화면으로 표시 ('F' 키로 창 모드 전환 가능)
+
+# 모니터 해상도 조회 (Windows). 고DPI 배율 환경에서 실제 픽셀 크기를 얻도록 DPI 인식 설정
+try:
+    ctypes.windll.user32.SetProcessDPIAware()
+    SCREEN_W = ctypes.windll.user32.GetSystemMetrics(0)
+    SCREEN_H = ctypes.windll.user32.GetSystemMetrics(1)
+except Exception:
+    SCREEN_W, SCREEN_H = 1920, 1080
+
+display_scale = 1.0
+display_off_x = 0
+display_off_y = 0
+
+def update_display_mapping():
+    """전체 화면 여부에 따라 640x480 캔버스 -> 화면 표시 좌표 변환 파라미터를 갱신합니다."""
+    global display_scale, display_off_x, display_off_y
+    if is_fullscreen:
+        # 4:3 비율을 유지한 채 화면에 맞는 최대 배율 (남는 영역은 검은 여백)
+        display_scale = min(SCREEN_W / 640.0, SCREEN_H / 480.0)
+        display_off_x = int((SCREEN_W - 640 * display_scale) / 2)
+        display_off_y = int((SCREEN_H - 480 * display_scale) / 2)
+    else:
+        display_scale = 1.0
+        display_off_x = 0
+        display_off_y = 0
+
+# =============================================================================
 # 5. 마우스 클릭 이벤트 핸들러 (HUD 버튼 6개 클릭 감지)
 # =============================================================================
 clicked_button_idx = -1
@@ -169,8 +204,11 @@ click_feedback_time = 0.0
 def mouse_callback(event, x, y, flags, param):
     global is_paused, current_speed_idx, current_sens_idx, current_bg_idx, request_home_reset, current_cam_idx
     global clicked_button_idx, click_feedback_time
-    
+
     if event == cv2.EVENT_LBUTTONDOWN:
+        # 전체 화면(확대) 표시 좌표를 원본 640x480 캔버스 좌표로 역변환
+        x = int((x - display_off_x) / display_scale)
+        y = int((y - display_off_y) / display_scale)
         # 하단 버튼 영역 Y축 범위: 415 ~ 455
         if 415 <= y <= 455:
             # 1. PAUSE / START 버튼 클릭 (x: 8 ~ 103)
@@ -268,7 +306,7 @@ if ENABLE_HAND_TRACKING:
     mp_hands = mp.solutions.hands
     mp_drawing = mp.solutions.drawing_utils
     hands = mp_hands.Hands(
-        max_num_hands=1,
+        max_num_hands=2,
         min_detection_confidence=0.75,
         min_tracking_confidence=0.7
     )
@@ -295,9 +333,14 @@ if cap is None or not cap.isOpened():
         raccoon.dispose()
     sys.exit()
 
-# 창 생성 및 마우스 이벤트 바인딩
+# 창 생성 및 마우스 이벤트 바인딩 (기본: 전체 화면)
 window_name = "RaccoonBot HUD Interface"
-cv2.namedWindow(window_name)
+cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+if is_fullscreen:
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+else:
+    cv2.resizeWindow(window_name, 640, 480)
+update_display_mapping()
 cv2.setMouseCallback(window_name, mouse_callback)
 
 # 외부 런처(Electron)에서 stdin으로 "STOP"을 보내면 안전 종료 절차를 밟도록 감시 스레드 가동
@@ -330,6 +373,10 @@ print("  - 화면 [가이드 박스] 범위가 600x390으로 최대 확장되었
 print("  - 가이드 박스를 이탈하더라도 조작이 끊기지 않고 부드럽게 한계점에 유지됩니다.")
 print("  - 하단 [BACKGROUND] 버튼으로 배경의 차단 강도를 조작할 수 있습니다.")
 print("  - 하단 [CAM SELECT] 버튼으로 카메라 채널을 실시간 전환 가능합니다.")
+print("  - 두 손 제어 매핑:")
+print("      오른손: 엄지-검지 간격 = 앞/뒤(X), 중지 높이 = 위/아래(Z)")
+print("      왼손  : 엄지-검지 간격 = 좌/우(Y), 중지 펴기/굽히기 = 그리퍼 열기/닫기")
+print("  - 전체 화면으로 시작합니다. 'F' 키로 전체 화면/창 모드를 전환할 수 있습니다.")
 print("  - 종료 키: 'q' 또는 'ESC'")
 print("=======================================================\n")
 
@@ -366,46 +413,118 @@ while cap.isOpened():
 
     hand_detected = False
     in_box = False
-    finger_count = 5
+    finger_count = 0
+    num_hands = 0
+    right_detected = False
+    left_detected = False
+    left_mid_up = None        # 왼손 중지 펴짐 여부 (그리퍼 판정용)
+    right_pinch_pts = None    # 오른손 엄지-검지 (X축 시각화)
+    left_pinch_pts = None     # 왼손 엄지-검지 (Y축 시각화)
+    right_mid_px = None       # 오른손 중지 끝 (Z축 시각화)
+    left_mid_px = None        # 왼손 중지 끝 (그리퍼 시각화)
     raw_x, raw_y, raw_z = smooth_x, smooth_y, smooth_z
 
     if results and results.multi_hand_landmarks:
         hand_detected = True
-        hand_landmarks = results.multi_hand_landmarks[0]
-        landmarks = hand_landmarks.landmark
-        
+        hand_list = results.multi_hand_landmarks
+        handedness_list = results.multi_handedness
+        num_hands = len(hand_list)
+
         # ---------------------------------------------------------------------
-        # A. 손가락 관절 뼈대선을 원본 프레임 상에 먼저 렌더링
+        # A. 손가락 관절 뼈대선 렌더링 + 손 영역 마스크 생성 (감지된 모든 손 처리)
         # ---------------------------------------------------------------------
         frame_with_skeleton = frame.copy()
-        mp_drawing.draw_landmarks(
-            frame_with_skeleton, 
-            hand_landmarks, 
-            mp_hands.HAND_CONNECTIONS,
-            mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4), # 관절 녹색
-            mp_drawing.DrawingSpec(color=(255, 255, 0), thickness=2, circle_radius=1) # 뼈대 노란색
-        )
-        
-        # ---------------------------------------------------------------------
-        # B. 손 영역 다각형(Convex Hull) 마스크 생성 및 Dilation(팽창)
-        # ---------------------------------------------------------------------
-        hand_pixel_points = []
-        for lm in landmarks:
-            px = int(lm.x * 640)
-            py = int(lm.y * 480)
-            px = max(0, min(639, px))
-            py = max(0, min(479, py))
-            hand_pixel_points.append([px, py])
-            
-        # 다각형을 구하여 내부를 가리는 마스크 형성
         mask = np.zeros((480, 640), dtype=np.uint8)
-        hull = cv2.convexHull(np.array(hand_pixel_points, dtype=np.int32))
-        cv2.drawContours(mask, [hull], -1, 255, -1)
-        
+
+        for hand_landmarks in hand_list:
+            mp_drawing.draw_landmarks(
+                frame_with_skeleton,
+                hand_landmarks,
+                mp_hands.HAND_CONNECTIONS,
+                mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4), # 관절 녹색
+                mp_drawing.DrawingSpec(color=(255, 255, 0), thickness=2, circle_radius=1) # 뼈대 노란색
+            )
+
+            # 손 영역 다각형(Convex Hull)을 구하여 마스크에 누적
+            hand_pixel_points = []
+            for lm in hand_landmarks.landmark:
+                px = max(0, min(639, int(lm.x * 640)))
+                py = max(0, min(479, int(lm.y * 480)))
+                hand_pixel_points.append([px, py])
+            hull = cv2.convexHull(np.array(hand_pixel_points, dtype=np.int32))
+            cv2.drawContours(mask, [hull], -1, 255, -1)
+
         # 손 외곽선이 칼같이 잘리지 않도록 40x40 커널로 여유 있게 마스크 팽창
         dilation_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))
         mask = cv2.dilate(mask, dilation_kernel, iterations=1)
-        
+
+        # ---------------------------------------------------------------------
+        # A-2. 좌/우 손 식별 (frame을 미리 좌우 반전했으므로 라벨이 실제 손과 일치)
+        #  - 오른손: 엄지-검지 간격 = X축(앞/뒤),  중지 높이 = Z축(위/아래)
+        #  - 왼손  : 엄지-검지 간격 = Y축(좌우),    중지 올림/내림 = 그리퍼
+        #  - 감지되지 않은 손이 담당하는 축은 직전 값을 유지(Hold)
+        # ---------------------------------------------------------------------
+        right_lm = None
+        left_lm = None
+        for i, hd in enumerate(handedness_list):
+            label = hd.classification[0].label
+            if label == "Right" and right_lm is None:
+                right_lm = hand_list[i].landmark
+            elif label == "Left" and left_lm is None:
+                left_lm = hand_list[i].landmark
+
+        sens_scale = SENS_PRESETS[current_sens_idx]  # 현재 민감도 배율
+
+        def _pinch_ratio(lm):
+            # 엄지(4)-검지(8) 간격을 손바닥 크기(손목0-새끼MCP17)로 정규화 -> 카메라 거리 무관
+            palm = math.hypot(lm[0].x - lm[17].x, lm[0].y - lm[17].y)
+            if palm < 1e-6:
+                return 0.0
+            return math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / palm
+
+        z_center = (LIMIT_Z_MIN + LIMIT_Z_MAX) / 2.0  # 12.5cm
+        z_range = LIMIT_Z_MAX - LIMIT_Z_MIN           # 15.0cm 가동 폭
+
+        # ----- 오른손: X축(엄지-검지 간격) + Z축(중지 화면 높이) -----
+        if right_lm is not None:
+            right_detected = True
+            right_pinch_pts = (
+                (int(right_lm[4].x * 640), int(right_lm[4].y * 480)),
+                (int(right_lm[8].x * 640), int(right_lm[8].y * 480)),
+            )
+            # X: 벌림 비율 0.3(오므림)~1.1(활짝) -> 뒤(10cm)~앞(20cm)
+            t_x = max(0.0, min(1.0, (_pinch_ratio(right_lm) - 0.3) / (1.1 - 0.3)))
+            raw_x = 15.0 + (t_x - 0.5) * (LIMIT_X_MAX - LIMIT_X_MIN) * sens_scale
+
+            # Z: 오른손 중지 끝(12)의 화면 세로 위치 -> 위(20cm)~아래(5cm)
+            mid_y_px = right_lm[12].y * 480
+            right_mid_px = (int(right_lm[12].x * 640), int(mid_y_px))
+            t_z = max(0.0, min(1.0, (mid_y_px - BOX_Y_MIN) / (BOX_Y_MAX - BOX_Y_MIN)))
+            raw_z = z_center + (0.5 - t_z) * z_range * sens_scale
+            in_box = (BOX_Y_MIN <= mid_y_px <= BOX_Y_MAX)
+
+        # ----- 왼손: Y축(엄지-검지 간격) + 그리퍼(중지 올림/내림) -----
+        if left_lm is not None:
+            left_detected = True
+            left_pinch_pts = (
+                (int(left_lm[4].x * 640), int(left_lm[4].y * 480)),
+                (int(left_lm[8].x * 640), int(left_lm[8].y * 480)),
+            )
+            # Y: 벌림 비율 0.3~1.1 -> 우(-15cm)~좌(+15cm)
+            t_y = max(0.0, min(1.0, (_pinch_ratio(left_lm) - 0.3) / (1.1 - 0.3)))
+            raw_y = (t_y - 0.5) * 2.0 * LIMIT_Y_MAX * sens_scale
+
+            # 그리퍼: 왼손 중지(12)가 펴짐(위) = 열림 / 굽힘(아래) = 닫힘
+            left_mid_px = (int(left_lm[12].x * 640), int(left_lm[12].y * 480))
+            left_mid_up = left_lm[12].y < left_lm[10].y
+            # 표시용: 왼손에서 펴진 손가락 수(엄지 제외)
+            finger_count = sum([
+                left_lm[8].y < left_lm[6].y,
+                left_lm[12].y < left_lm[10].y,
+                left_lm[16].y < left_lm[14].y,
+                left_lm[20].y < left_lm[18].y,
+            ])
+
         # ---------------------------------------------------------------------
         # C. 누끼 합성 적용 (배경 모드가 ORIGINAL이 아닐 때만 캔버스에 덮어씀)
         # ---------------------------------------------------------------------
@@ -414,71 +533,18 @@ while cap.isOpened():
             canvas = np.where(mask_3ch == 255, frame_with_skeleton, bg_frame)
         else:
             canvas = frame_with_skeleton.copy()
-            
-        # ---------------------------------------------------------------------
-        # D. 가이드 박스 영역 체크 및 정밀 매핑 연산
-        # ---------------------------------------------------------------------
-        # 손목 관절(Landmark 0) 픽셀 좌표 추출
-        wrist_px_x = landmarks[0].x * 640
-        wrist_px_y = landmarks[0].y * 480
-        
-        # 손목이 화면 중앙-하단 가이드 영역 내에 진입했는지 판별
-        in_box = (BOX_X_MIN <= wrist_px_x <= BOX_X_MAX) and (BOX_Y_MIN <= wrist_px_y <= BOX_Y_MAX)
-        
-        # 현재 민감도 설정값 배율 적용
-        sens_scale = SENS_PRESETS[current_sens_idx]
-        
-        # [Clamping 핫스왑 매핑 적용]:
-        # 가이드 박스 영역 밖으로 이탈해도 제어 신호가 뚝 끊기지 않고 0.0~1.0 비율로 클램핑되어
-        # 안전하게 모서리 경계 한계점에서 로봇이 대기하고 있도록 보정합니다.
-        
-        # 1. Y축 제어 (좌/우): 가이드 박스 내 상대 가로 위치비율 매핑 (0.0~1.0으로 Clamping)
-        t_y = (wrist_px_x - BOX_X_MIN) / (BOX_X_MAX - BOX_X_MIN)
-        t_y = max(0.0, min(1.0, t_y))
-        raw_y = (0.5 - t_y) * 2.0 * LIMIT_Y_MAX * sens_scale
-        
-        # 2. Z축 제어 (위/아래): 가이드 박스 내 상대 세로 위치비율 매핑 (0.0~1.0으로 Clamping)
-        t_z = (wrist_px_y - BOX_Y_MIN) / (BOX_Y_MAX - BOX_Y_MIN)
-        t_z = max(0.0, min(1.0, t_z))
-        z_center = (LIMIT_Z_MIN + LIMIT_Z_MAX) / 2.0  # 12.5cm
-        z_range = LIMIT_Z_MAX - LIMIT_Z_MIN            # 15.0cm 가동 폭
-        raw_z = z_center + (0.5 - t_z) * z_range * sens_scale
-        
-        # 3. X축 제어 (앞/뒤): 변하지 않는 손목-새끼손가락 마디 거리 비율 매핑
-        dx = landmarks[0].x - landmarks[17].x
-        dy = landmarks[0].y - landmarks[17].y
-        palm_size = math.sqrt(dx*dx + dy*dy)
-        
-        # palm_size 비율: 0.04(멀리 위치) ~ 0.12(가깝게 위치) -> 10cm ~ 20cm 매핑
-        normalized_size = (palm_size - 0.04) / (0.12 - 0.04)
-        normalized_size = max(0.0, min(1.0, normalized_size))
-        raw_x = 15.0 + (normalized_size * 10.0 - 5.0) * sens_scale
-        
+
         # 안전 구역 Clamping 처리
         raw_x = max(LIMIT_X_MIN, min(LIMIT_X_MAX, raw_x))
         raw_y = max(LIMIT_Y_MIN, min(LIMIT_Y_MAX, raw_y))
         raw_z = max(LIMIT_Z_MIN, min(LIMIT_Z_MAX, raw_z))
-        
+
         # 지수 이동 평균(EMA) 필터로 부드럽게 감속 보정 (일시정지 아닐 때 항시 실행)
         if not is_paused:
             smooth_x = FILTER_ALPHA * raw_x + (1 - FILTER_ALPHA) * smooth_x
             smooth_y = FILTER_ALPHA * raw_y + (1 - FILTER_ALPHA) * smooth_y
             smooth_z = FILTER_ALPHA * raw_z + (1 - FILTER_ALPHA) * smooth_z
-            
-        # ---------------------------------------------------------------------
-        # E. 손가락 제스처 판별 (그리퍼 연동)
-        # ---------------------------------------------------------------------
-        fingers_open = []
-        # 엄지 (손바닥 구조 X좌표 판별)
-        fingers_open.append(landmarks[4].x > landmarks[3].x)
-        # 검지, 중지, 약지, 새끼 손가락 굽힘 여부 판별
-        fingers_open.append(landmarks[8].y < landmarks[6].y)
-        fingers_open.append(landmarks[12].y < landmarks[10].y)
-        fingers_open.append(landmarks[16].y < landmarks[14].y)
-        fingers_open.append(landmarks[20].y < landmarks[18].y)
-        
-        finger_count = fingers_open.count(True)
-        
+
         # ---------------------------------------------------------------------
         # F. 로봇 제어 신호 송출 제어 (이탈 시 정지 제약을 없애고 전송 주기 및 데드존만 충족하면 상시 전송)
         # ---------------------------------------------------------------------
@@ -516,8 +582,9 @@ while cap.isOpened():
                 
             last_send_time = current_time
             
-        # 그리퍼 제어 (안전상 제스처는 항상 작동)
-        if finger_count <= 1 and current_gripper_state != 0:
+        # 그리퍼 제어: 왼손 중지 올림(펴짐)=열림 / 내림(굽힘)=닫힘
+        # (왼손 미감지 시 left_mid_up=None이라 현재 상태를 그대로 유지)
+        if left_mid_up is False and current_gripper_state != 0:
             current_gripper_state = 0
             if is_robot_connected and raccoon:
                 try:
@@ -525,8 +592,8 @@ while cap.isOpened():
                 except Exception as ex:
                     print(f"[오류] 그리퍼 닫기 오류: {ex}")
             print("[그리퍼] 닫힘 (CLOSED)")
-            
-        elif finger_count >= 4 and current_gripper_state != 1:
+
+        elif left_mid_up is True and current_gripper_state != 1:
             current_gripper_state = 1
             if is_robot_connected and raccoon:
                 try:
@@ -558,12 +625,12 @@ while cap.isOpened():
         if in_box:
             box_color = (0, 255, 0)  # 안전 진입 상태: 녹색 테두리
             box_thickness = 1
-            box_text = "CONTROL ZONE (ACTIVE)"
+            box_text = "Z RANGE (RIGHT MIDDLE FINGER)"
             box_text_color = (0, 255, 0)
         else:
             box_color = (0, 165, 255)  # 가이드 박스 이탈: 주황색 테두리 (정지 없음, Clamped 상태로 제어됨)
             box_thickness = 2
-            box_text = "OUT OF ZONE (CLAMPED CONTROL)"
+            box_text = "Z RANGE (RIGHT MIDDLE FINGER)"
             box_text_color = (0, 165, 255)
     else:
         box_color = (120, 120, 120)  # 손 미감지 상태: 회색
@@ -571,11 +638,43 @@ while cap.isOpened():
         box_text = "WAITING FOR HAND..."
         box_text_color = (180, 180, 180)
 
-    # 가이드 박스 그리기
+    # 가이드 박스 그리기 (라벨은 상단 정보 라인과 겹치지 않게 박스 안쪽 하단에 표시)
     cv2.rectangle(canvas, (BOX_X_MIN, BOX_Y_MIN), (BOX_X_MAX, BOX_Y_MAX), box_color, box_thickness)
-    # 박스가 헤더 바로 아래까지 확장되어 라벨은 박스 안쪽 상단에 표시
-    cv2.putText(canvas, box_text, (BOX_X_MIN + 6, BOX_Y_MIN + 16),
+    cv2.putText(canvas, box_text, (BOX_X_MIN + 6, BOX_Y_MAX - 10),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_text_color, 1, cv2.LINE_AA)
+
+    # ---------------------------------------------------------------------
+    # 손가락 제어 시각화 (핀치 간격/중지 위치에 실시간 좌표값 표시)
+    # ---------------------------------------------------------------------
+    def draw_pinch(pts, label, color):
+        """엄지-검지 두 점을 잇는 선과 중앙 라벨을 그립니다."""
+        p1, p2 = pts
+        cv2.line(canvas, p1, p2, color, 2, cv2.LINE_AA)
+        cv2.circle(canvas, p1, 4, color, -1)
+        cv2.circle(canvas, p2, 4, color, -1)
+        mx, my = (p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2
+        cv2.putText(canvas, label, (mx + 8, my - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(canvas, label, (mx + 8, my - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+    def draw_marker(pt, label, color):
+        """중지 끝 등 단일 지점에 마커와 라벨을 그립니다."""
+        cv2.circle(canvas, pt, 7, color, 2)
+        cv2.putText(canvas, label, (pt[0] + 10, pt[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(canvas, label, (pt[0] + 10, pt[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+    # 오른손: X축(엄지-검지, 자홍) / Z축(중지, 하늘색)
+    if right_pinch_pts is not None:
+        draw_pinch(right_pinch_pts, f"X {smooth_x:.1f}cm", (255, 0, 255))
+    if right_mid_px is not None:
+        draw_marker(right_mid_px, f"Z {smooth_z:.1f}cm", (255, 200, 0))
+
+    # 왼손: Y축(엄지-검지, 초록) / 그리퍼(중지, 상태색)
+    if left_pinch_pts is not None:
+        draw_pinch(left_pinch_pts, f"Y {smooth_y:.1f}cm", (0, 255, 0))
+    if left_mid_px is not None:
+        grip_txt = "GRIP OPEN" if current_gripper_state == 1 else "GRIP CLOSE"
+        grip_col = (0, 255, 0) if current_gripper_state == 1 else (0, 165, 255)
+        draw_marker(left_mid_px, grip_txt, grip_col)
 
     # =============================================================================
     # 8. 프리미엄 가상 HUD UI 디자인 그리기
@@ -600,19 +699,16 @@ while cap.isOpened():
     cv2.putText(canvas, status_text, (445, 36), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1, cv2.LINE_AA)
 
-    # 좌측 패널: 로봇 3D 좌표 출력 모니터
-    cv2.rectangle(canvas, (15, 75), (290, 225), (15, 15, 15), -1)
-    cv2.rectangle(canvas, (15, 75), (290, 225), (120, 120, 120), 1)
-    cv2.putText(canvas, "[ROBOT SPACE POSITION]", (25, 98), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(canvas, f"Target X (Front) : {smooth_x:.1f} cm", (25, 125), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(canvas, f"Target Y (Left)  : {smooth_y:.1f} cm", (25, 150), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(canvas, f"Target Z (Height): {smooth_z:.1f} cm", (25, 175), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-    
-    # 조종 작동 상태(Pause/Active/Clamped) 세부 표시 (이탈 시 HOLD가 아니라 CLAMPED로 유연하게 제어됨을 표기)
+    # 상단 정보 라인: 기존 좌/우 대형 패널을 상단 두 줄 텍스트로 압축하여 중앙 카메라 시야 확보
+    # (검은 외곽선을 먼저 두껍게 그려 밝은 배경에서도 가독성 유지)
+    def draw_hud_text(text, org, color, scale=0.5):
+        cv2.putText(canvas, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(canvas, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
+
+    # 좌측 상단 1행: 로봇 목표 XYZ 좌표
+    draw_hud_text(f"X:{smooth_x:.1f}  Y:{smooth_y:.1f}  Z:{smooth_z:.1f} cm", (15, 82), (0, 255, 255), 0.55)
+
+    # 좌측 상단 2행: 조종 작동 상태 (이탈 시 HOLD가 아니라 CLAMPED로 유연하게 제어됨을 표기)
     if is_paused:
         status_desc = "PAUSED (MOTION LOCKED)"
         desc_color = (0, 0, 255)
@@ -625,27 +721,18 @@ while cap.isOpened():
     else:
         status_desc = "ACTIVE (TRACKING)"
         desc_color = (0, 255, 0)
-        
-    cv2.putText(canvas, status_desc, (25, 205), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, desc_color, 1, cv2.LINE_AA)
+    draw_hud_text(status_desc, (15, 102), desc_color, 0.45)
 
-    # 우측 패널: 카메라 센서 및 제스처 인식 정보 모니터
-    cv2.rectangle(canvas, (350, 75), (625, 225), (15, 15, 15), -1)
-    cv2.rectangle(canvas, (350, 75), (625, 225), (120, 120, 120), 1)
-    cv2.putText(canvas, "[GESTURE & SENSOR INFO]", (360, 98), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
-                
-    det_status = "TRACKING ACTIVE" if hand_detected else "NO HAND DETECTED"
-    det_color = (0, 255, 0) if hand_detected else (0, 0, 255)
-    cv2.putText(canvas, f"Sensor State : {det_status}", (360, 125), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, det_color, 1, cv2.LINE_AA)
-    cv2.putText(canvas, f"Fingers Open : {finger_count} / 5", (360, 150), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-                
+    # 우측 상단 1행: 그리퍼 상태
     gripper_str = "OPEN" if current_gripper_state == 1 else "CLOSED"
     gripper_color = (0, 255, 0) if current_gripper_state == 1 else (0, 165, 255)
-    cv2.putText(canvas, f"Gripper State: {gripper_str}", (360, 175), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, gripper_color, 2, cv2.LINE_AA)
+    draw_hud_text(f"Gripper: {gripper_str}", (400, 82), gripper_color, 0.5)
+
+    # 우측 상단 2행: 좌/우 손 감지 상태 (R=X/Z 이동, L=Y/그리퍼)
+    r_txt = "R:X+Z" if right_detected else "R:--"
+    l_txt = "L:Y+GRIP" if left_detected else "L:--"
+    both_color = (0, 255, 255) if (right_detected and left_detected) else (255, 255, 255) if hand_detected else (120, 120, 120)
+    draw_hud_text(f"{r_txt}  {l_txt}", (400, 102), both_color, 0.45)
                 
     # ---------------------------------------------------------------------
     # H. 하단 가상 제어판 버튼 패널 렌더링 (6버튼 레이아웃)
@@ -698,17 +785,36 @@ while cap.isOpened():
     prev_frame_time = new_frame_time
     cv2.putText(canvas, f"FPS: {int(fps)}", (15, 380), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (120, 120, 120), 1, cv2.LINE_AA)
-    cv2.putText(canvas, "Mouse Click HUD Button to Adjust | Press 'q' to Exit", (250, 380), 
+    cv2.putText(canvas, "Click HUD Button | 'F' Fullscreen | 'Q' Exit", (300, 380),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (120, 120, 120), 1, cv2.LINE_AA)
 
-    # 최종 합성된 캔버스 렌더링
-    cv2.imshow(window_name, canvas)
+    # 최종 합성된 캔버스 렌더링 (전체 화면 모드에서는 비율 유지 확대 + 레터박스)
+    if is_fullscreen:
+        disp_w = int(640 * display_scale)
+        disp_h = int(480 * display_scale)
+        scaled = cv2.resize(canvas, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
+        screen_canvas = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
+        screen_canvas[display_off_y:display_off_y + disp_h, display_off_x:display_off_x + disp_w] = scaled
+        cv2.imshow(window_name, screen_canvas)
+    else:
+        cv2.imshow(window_name, canvas)
 
     # 키 입력 대기 및 종료 감지
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q') or key == 27:
         print("[정보] 사용자에 의해 제어 루프를 탈출합니다.")
         break
+
+    # 'F' 키: 전체 화면 <-> 창 모드 전환
+    if key in (ord('f'), ord('F')):
+        is_fullscreen = not is_fullscreen
+        if is_fullscreen:
+            cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        else:
+            cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window_name, 640, 480)
+        update_display_mapping()
+        print(f"[정보] 화면 모드 전환 -> {'전체 화면' if is_fullscreen else '창 모드'}")
 
     # 외부 런처의 안전 종료(STOP) 요청 감지
     if stop_requested:
