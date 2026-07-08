@@ -6,6 +6,7 @@ import * as Ja from 'blockly/msg/ja';
 import * as En from 'blockly/msg/en';
 import { toolbox } from './toolbox.js';
 import { resetUniqueCounter } from './common.js';
+import { EXAMPLES } from './examples.js';
 
 const LOCALES = { ko: Ko, ja: Ja, en: En };
 
@@ -47,6 +48,7 @@ function resizeWorkspace(workspace) {
 window.RaccoonBlockly = {
   init,
   getMainWorkspace: () => Blockly.getMainWorkspace(),
+  examples: EXAMPLES,
   setLocale,
   generatePython,
   saveWorkspace,
