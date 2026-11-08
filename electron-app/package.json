@@ -1,0 +1,44 @@
+{
+  "name": "raccoonbot-guide",
+  "version": "1.0.0",
+  "description": "RaccoonBot usage guide & camera control launcher (KO/JA)",
+  "main": "main.js",
+  "scripts": {
+    "build:blockly": "esbuild renderer/blockly/src/entry.js --bundle --outfile=renderer/blockly/bundle.js --format=iife --platform=browser && node scripts/copy-blockly-media.js",
+    "prestart": "npm run build:blockly",
+    "start": "electron .",
+    "predist": "npm run build:blockly",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "blockly": "^13.1.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.28.1"
+  },
+  "build": {
+    "appId": "net.robomation.raccoonbot.guide",
+    "productName": "RaccoonBot Guide",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../camera_control.py",
+        "to": "camera_control.py"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
