@@ -114,7 +114,7 @@ const homePose = {
               D1: num(0),
               D2: num(-10),
               D3: num(-140),
-              D4: num(0),
+              D4: num(60),
               SPEED: num(60),
             },
             next: {

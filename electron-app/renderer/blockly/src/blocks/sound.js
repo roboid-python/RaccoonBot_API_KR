@@ -12,7 +12,7 @@ Blockly.common.defineBlocksWithJsonArray([
     previousStatement: null,
     nextStatement: null,
     colour: COLOUR,
-    tooltip: '음(note) 재생 시 사용할 빠르기(분당 박자 수)를 설정합니다.',
+    tooltip: '음(note) 재생 시 사용할 빠르기(분당 박자 수)를 설정합니다. 0보다 커야 하며, 설정하지 않으면 60 BPM입니다.',
   },
   {
     type: 'raccoon_note',
@@ -25,7 +25,7 @@ Blockly.common.defineBlocksWithJsonArray([
     nextStatement: null,
     colour: COLOUR,
     inputsInline: true,
-    tooltip: '지정한 음을 지정한 박자 수만큼 연주합니다. 박자를 비우면 소리가 켜진 채로 다음 블록으로 넘어갑니다.',
+    tooltip: '지정한 음을 지정한 박자 수만큼 연주하고 끝날 때까지 기다립니다. "끄기"를 고르면 그 박자만큼 쉽니다. (재생 시간 = 박자 × 60 / BPM 초)',
   },
   {
     type: 'raccoon_note_on',
@@ -47,7 +47,7 @@ Blockly.common.defineBlocksWithJsonArray([
     nextStatement: null,
     colour: COLOUR,
     inputsInline: true,
-    tooltip: '효과음을 재생합니다. 재생이 끝날 때까지 기다리지 않고 다음 블록으로 넘어갑니다.',
+    tooltip: '효과음을 재생합니다. 재생이 끝날 때까지 기다리지 않고 다음 블록으로 넘어갑니다. 반복을 음수로 하면 계속 반복하고, "끄기"를 고르면 재생 중인 소리를 멈춥니다.',
   },
   {
     type: 'raccoon_sound_until_done',
@@ -73,7 +73,7 @@ Blockly.common.defineBlocksWithJsonArray([
 ]);
 
 pythonGenerator.forBlock['raccoon_tempo'] = function (block, gen) {
-  const bpm = gen.valueToCode(block, 'BPM', Order.NONE) || '120';
+  const bpm = gen.valueToCode(block, 'BPM', Order.NONE) || '60';
   return `raccoon.tempo(${bpm})\n`;
 };
 
@@ -111,22 +111,25 @@ export const soundCategory = {
     {
       kind: 'block',
       type: 'raccoon_tempo',
-      inputs: { BPM: { shadow: { type: 'math_number', fields: { NUM: 120 } } } },
+      inputs: { BPM: { shadow: { type: 'math_number', fields: { NUM: 60 } } } },
     },
     {
       kind: 'block',
       type: 'raccoon_note',
+      fields: { PITCH: 'c4' },
       inputs: { BEATS: { shadow: { type: 'math_number', fields: { NUM: 0.5 } } } },
     },
-    { kind: 'block', type: 'raccoon_note_on' },
+    { kind: 'block', type: 'raccoon_note_on', fields: { PITCH: 'c4' } },
     {
       kind: 'block',
       type: 'raccoon_sound',
+      fields: { SOUND: 'beep' },
       inputs: { REPEAT: { shadow: { type: 'math_number', fields: { NUM: 1 } } } },
     },
     {
       kind: 'block',
       type: 'raccoon_sound_until_done',
+      fields: { SOUND: 'beep' },
       inputs: { REPEAT: { shadow: { type: 'math_number', fields: { NUM: 1 } } } },
     },
     { kind: 'block', type: 'raccoon_beep' },

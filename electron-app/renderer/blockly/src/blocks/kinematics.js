@@ -1,12 +1,15 @@
 import * as Blockly from 'blockly/core';
 import { pythonGenerator, Order } from 'blockly/python';
-import { JOINT_OPTIONS_NO_ALL } from '../common.js';
+import { JOINT_OPTIONS_NO_ALL, UNIT_OPTIONS } from '../common.js';
 
 const COLOUR = 160;
+// Coordinate frame used by roboid Raccoon.xyz()/move_to(): origin at the base on the
+// table, X = forward, Y = left, Z = up (base joint axis is 8.25cm above the table,
+// upper arm and forearm are 10cm each).
 const AXIS_OPTIONS = [
-  ['X (앞/뒤)', '0'],
-  ['Y (좌/우)', '1'],
-  ['Z (위/아래)', '2'],
+  ['X (앞+/뒤-)', '0'],
+  ['Y (왼쪽+/오른쪽-)', '1'],
+  ['Z (위+/아래-)', '2'],
 ];
 
 Blockly.common.defineBlocksWithJsonArray([
@@ -23,7 +26,7 @@ Blockly.common.defineBlocksWithJsonArray([
     previousStatement: null,
     nextStatement: null,
     colour: COLOUR,
-    tooltip: '그리퍼(말단 장치)를 절대 XYZ 좌표(cm)로 이동합니다.',
+    tooltip: '좌표 기준점(기본: 그리퍼 끝)을 절대 XYZ 좌표로 이동합니다. 원점은 로봇 바닥 중심, X는 앞, Y는 왼쪽, Z는 위쪽입니다. 손목 각도는 현재 값을 유지하며, 도달할 수 없거나 관절 범위를 벗어나면 오류음이 납니다.',
   },
   {
     type: 'raccoon_move_by',
@@ -38,7 +41,7 @@ Blockly.common.defineBlocksWithJsonArray([
     previousStatement: null,
     nextStatement: null,
     colour: COLOUR,
-    tooltip: '현재 위치에서 상대적으로(dX, dY, dZ) 이동합니다.',
+    tooltip: '현재 좌표에서 상대적으로(dX, dY, dZ) 이동합니다. 단위는 현재 설정(cm/inch)을 따릅니다.',
   },
   {
     type: 'raccoon_can_move_to',
@@ -51,7 +54,7 @@ Blockly.common.defineBlocksWithJsonArray([
     output: 'Boolean',
     colour: COLOUR,
     inputsInline: true,
-    tooltip: '해당 좌표가 로봇이 도달 가능한 안전 범위 안에 있는지 확인합니다.',
+    tooltip: '현재 손목 각도를 유지한 채로 해당 좌표에 도달할 수 있고, 계산된 관절 각도가 모두 허용 범위 안인지 확인합니다.',
   },
   {
     type: 'raccoon_can_move_by',
@@ -72,7 +75,7 @@ Blockly.common.defineBlocksWithJsonArray([
     args0: [{ type: 'field_dropdown', name: 'AXIS', options: AXIS_OPTIONS }],
     output: 'Number',
     colour: COLOUR,
-    tooltip: '현재 말단 장치의 X, Y, 또는 Z 좌표 값(cm)을 읽습니다.',
+    tooltip: '엔코더 값으로 계산한 현재 좌표 기준점의 X, Y, 또는 Z 좌표를 읽습니다. (단위: 현재 설정)',
   },
   {
     type: 'raccoon_xyz_to_degree',
@@ -86,7 +89,7 @@ Blockly.common.defineBlocksWithJsonArray([
     output: 'Number',
     colour: COLOUR,
     inputsInline: true,
-    tooltip: '역기구학: XYZ 좌표에 대응하는 특정 관절의 각도를 계산합니다. 도달 불가능하면 빈 값이 됩니다.',
+    tooltip: '역기구학: 현재 손목 방향을 유지할 때 XYZ 좌표에 대응하는 관절 각도를 계산합니다. 도달 불가능하면 None(빈 값)이 됩니다.',
   },
   {
     type: 'raccoon_degree_to_xyz',
@@ -100,9 +103,21 @@ Blockly.common.defineBlocksWithJsonArray([
     ],
     output: 'Number',
     colour: COLOUR,
-    tooltip: '순기구학: 4개 관절 각도에 대응하는 X, Y, 또는 Z 좌표를 계산합니다.',
+    tooltip: '순기구학: 4개 관절 각도에 대응하는 좌표 기준점의 X, Y, 또는 Z 좌표를 계산합니다.',
+  },
+  {
+    type: 'raccoon_unit',
+    message0: '좌표 단위를 %1 (으)로 설정',
+    args0: [{ type: 'field_dropdown', name: 'UNIT', options: UNIT_OPTIONS }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOUR,
+    tooltip: '좌표 이동/계산 블록에 사용할 길이 단위를 정합니다. (기본: cm)',
   },
 ]);
+
+pythonGenerator.forBlock['raccoon_unit'] = (block) => `raccoon.unit('${block.getFieldValue('UNIT')}')
+`;
 
 function wait(block) {
   return block.getFieldValue('WAIT') === 'TRUE' ? 'True' : 'False';
@@ -165,6 +180,7 @@ export const kinematicsCategory = {
   name: '좌표 및 기구학',
   colour: COLOUR,
   contents: [
+    { kind: 'block', type: 'raccoon_unit' },
     {
       kind: 'block',
       type: 'raccoon_move_to',
@@ -220,7 +236,7 @@ export const kinematicsCategory = {
         D1: { shadow: { type: 'math_number', fields: { NUM: 0 } } },
         D2: { shadow: { type: 'math_number', fields: { NUM: -10 } } },
         D3: { shadow: { type: 'math_number', fields: { NUM: -140 } } },
-        D4: { shadow: { type: 'math_number', fields: { NUM: 0 } } },
+        D4: { shadow: { type: 'math_number', fields: { NUM: 60 } } },
       },
     },
   ],

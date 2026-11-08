@@ -67,7 +67,7 @@ Blockly.common.defineBlocksWithJsonArray([
     previousStatement: null,
     nextStatement: null,
     colour: COLOUR,
-    tooltip: '라쿤봇의 상태를 초기화하고 기본 자세로 되돌립니다.',
+    tooltip: '라쿤봇의 모드(고정·정밀 모드·좌표 기준점·빠르기)를 초기화하고, 그리퍼를 연 뒤 기본 자세(0, -10, -140, 60°)로 이동할 때까지 기다립니다.',
   },
   {
     type: 'raccoon_scan',

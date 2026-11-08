@@ -1,6 +1,23 @@
 // Shared dropdown option lists and small helpers used by several block/generator files.
-// Values mirror the real roboid.Raccoon Python API (verified against the installed
-// package source), not the README's paraphrased method list.
+// Values mirror the real roboid.Raccoon Python API, cross-checked against both the
+// installed package source and the roboid/raccoon.py shipped by py.hamster.school
+// (Hamster School Python), not the README's paraphrased method list.
+
+// Joint angle limits enforced by Raccoon.can_degree_to()/degree_to() (degrees).
+// A target outside these ranges is rejected and the robot plays an error sound.
+export const JOINT_LIMITS = {
+  1: [-120, 120],
+  2: [-90, 30],
+  3: [-150, 0],
+  4: [-105, 105],
+};
+
+// Pose applied by Raccoon.init_pose() / reset() (and on construction).
+export const INIT_POSE = [0, -10, -140, 60];
+
+export const JOINT_LIMITS_TEXT = Object.entries(JOINT_LIMITS)
+  .map(([j, [lo, hi]]) => `관절${j}: ${lo}~${hi}°`)
+  .join(', ');
 
 export const JOINT_OPTIONS = [
   ['1번 관절', '1'],
@@ -40,15 +57,27 @@ export const SOUND_OPTIONS = [
   ['안녕(bye)', 'bye'],
 ];
 
-// Note-name dropdown: pitch classes across octaves 3-5, plus "off".
+// Note-name dropdown: pitch classes across octaves 2-6, plus "off".
+// Raccoon.note() parses "<name><octave>" case-insensitively; valid octaves are 1-7
+// (piano keys A0..C8), octave 4 is the default when omitted.
 const NOTE_NAMES = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
 export const NOTE_OPTIONS = [['끄기(off)', 'off']];
-for (const octave of [3, 4, 5]) {
+for (const octave of [2, 3, 4, 5, 6]) {
   for (const name of NOTE_NAMES) {
     const value = `${name}${octave}`;
     NOTE_OPTIONS.push([value.toUpperCase(), value]);
   }
 }
+
+export const END_EFFECTOR_OPTIONS = [
+  ['그리퍼 끝', 'gripper'],
+  ['손목', 'wrist'],
+];
+
+export const UNIT_OPTIONS = [
+  ['cm', 'cm'],
+  ['inch', 'inch'],
+];
 
 export const BATTERY_STATE_OPTIONS = [
   ['부족(EMPTY)', '0'],
